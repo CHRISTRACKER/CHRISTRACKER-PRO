@@ -1,0 +1,275 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#8b1e2d">
+<title>CHRISTRACKER Pro</title>
+<style>
+:root{--red:#8b1e2d;--silver:#e5e7eb}
+*{box-sizing:border-box}
+body{margin:0;background:#f4f5f7;color:#222;font:15px Arial,sans-serif}
+header{background:var(--red);color:white;padding:20px 15px}
+header h1{margin:0 0 6px;font-size:24px}
+header p{margin:4px 0;font-size:13px}
+main{max-width:850px;margin:auto;padding:14px}
+section{background:white;padding:16px;margin:0 0 14px;border-radius:10px;border:1px solid #ddd}
+h2{font-size:18px;margin:0 0 14px}
+input,select,button{font:inherit;padding:11px;border-radius:6px;border:1px solid #bbb;width:100%;margin:4px 0}
+button{background:var(--red);color:white;border:0;font-weight:bold;cursor:pointer}
+button.secondary{background:#555}
+button.danger{background:#a32121}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.small{font-size:12px;color:#555}
+.student{border:1px solid #ddd;border-radius:7px;padding:10px;margin:8px 0}
+.student strong{display:block;margin-bottom:5px}
+#notice{padding:10px;border-radius:6px;background:#fff0f0;margin-bottom:12px}
+</style>
+</head>
+<body>
+<header>
+<h1>CHRISTRACKER Pro</h1>
+<p>SANDINGAN NATIONAL HIGH SCHOOL</p>
+<p>Calayugan Norte, Loon, Bohol | School ID: 302902</p>
+</header>
+<main>
+<div id="notice">Welcome! Create your class to begin.</div>
+
+<section>
+<h2>School Settings</h2>
+<label for="sy">School Year</label>
+<input id="sy" value="2026–2027">
+<label for="smsMode">Guardian SMS mode</label>
+<select id="smsMode">
+<option value="manual">Manual — send only when I choose</option>
+<option value="automatic">Automatic — send when an absent status is recorded</option>
+</select>
+<p class="small">Automatic mode requires Android SMS permission, a SIM, a valid guardian number, and successful testing. SMS charges may apply.</p>
+<button onclick="saveSettings()">Save Settings</button>
+</section>
+
+<section>
+<h2>1. Manage Classes</h2>
+<div class="row">
+<input id="className" placeholder="Class name (e.g. Grade 9 - Rizal)">
+<button onclick="addClass()">Add Class</button>
+</div>
+<label for="classSelect">Select Class</label>
+<select id="classSelect" onchange="render()">
+<option value="">No classes yet</option>
+</select>
+</section>
+
+<section>
+<h2>2. Add Student</h2>
+<input id="studentName" placeholder="Student full name">
+<input id="guardianName" placeholder="Parent/guardian name">
+<input id="guardianPhone" type="tel" placeholder="Guardian mobile number (e.g. 09XXXXXXXXX)">
+<button onclick="addStudent()">Add Student</button>
+</section>
+
+<section>
+<h2>3. Record Attendance</h2>
+<label for="attDate">Attendance date</label>
+<input id="attDate" type="date">
+<div id="attendanceList">Add a class and students first.</div>
+<button onclick="saveAttendance()">Save Attendance</button>
+<button class="secondary" onclick="sendManual()">Send Pending Absence SMS (Manual)</button>
+</section>
+
+<section>
+<h2>4. Attendance Report</h2>
+<div id="report">No records yet.</div>
+<button class="secondary" onclick="exportBackup()">Download Backup (JSON)</button>
+<label for="restoreFile">Restore from JSON backup</label>
+<input id="restoreFile" type="file" accept=".json,application/json">
+<button class="secondary" onclick="restoreBackup()">Restore Backup</button>
+<p class="small">Keep a copy of your backup in a safe location. Restoring a backup replaces this Pro app's current data.</p>
+</section>
+</main>
+
+<script>
+'use strict';
+const KEY='christracker_pro_data';
+const $=id=>document.getElementById(id);
+const blank=()=>({
+ schoolYear:'2026–2027',smsMode:'manual',
+ classes:[],students:{},attendance:{},sent:{}
+});
+let db;
+try{
+ db=JSON.parse(localStorage.getItem(KEY))||blank();
+ if(!Array.isArray(db.classes)) db=blank();
+}catch(e){db=blank()}
+
+function save(){
+ localStorage.setItem(KEY,JSON.stringify(db));
+}
+function msg(t){
+ $('notice').textContent=t;
+}
+function id(){
+ return 'id-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
+}
+function saveSettings(){
+ db.schoolYear=$('sy').value.trim()||'2026–2027';
+ db.smsMode=$('smsMode').value;
+ save();
+ msg('Settings saved.');
+}
+function addClass(){
+ const name=$('className').value.trim();
+ if(!name)return msg('Enter a class name first.');
+ const c={id:id(),name};
+ db.classes.push(c);
+ db.students[c.id]=[];
+ $('className').value='';
+ save();refresh();$('classSelect').value=c.id;render();
+ msg('Class added.');
+}
+function selectedClass(){return $('classSelect').value}
+function addStudent(){
+ const c=selectedClass();
+ if(!c)return msg('Create and select a class first.');
+ const name=$('studentName').value.trim();
+ if(!name)return msg('Enter the student name.');
+ const s={
+  id:id(),name,
+  guardian:$('guardianName').value.trim(),
+  phone:$('guardianPhone').value.trim()
+ };
+ db.students[c]=db.students[c]||[];
+ db.students[c].push(s);
+ $('studentName').value='';
+ $('guardianName').value='';
+ $('guardianPhone').value='';
+ save();render();
+ msg('Student added.');
+}
+function refresh(){
+ const old=$('classSelect').value;
+ $('classSelect').innerHTML='';
+ if(!db.classes.length){
+  $('classSelect').add(new Option('No classes yet',''));
+ }else{
+  db.classes.forEach(c=>$('classSelect').add(new Option(c.name,c.id)));
+  if(db.classes.some(c=>c.id===old))$('classSelect').value=old;
+ }
+ $('sy').value=db.schoolYear||'2026–2027';
+ $('smsMode').value=db.smsMode||'manual';
+}
+function keyFor(c,date,s){return c+'|'+date+'|'+s}
+function render(){
+ const c=selectedClass(),date=$('attDate').value;
+ const list=$('attendanceList');
+ list.innerHTML='';
+ if(!c){list.textContent='Create and select a class first.';renderReport();return}
+ const students=db.students[c]||[];
+ if(!students.length){list.textContent='No students in this class yet.';renderReport();return}
+ students.forEach(s=>{
+  const k=keyFor(c,date,s.id);
+  const old=(db.attendance[k]||{}).status||'Present';
+  const div=document.createElement('div');div.className='student';
+  const strong=document.createElement('strong');strong.textContent=s.name;
+  const info=document.createElement('div');info.className='small';
+  info.textContent='Guardian: '+(s.guardian||'Not provided')+' | '+(s.phone||'No phone');
+  const sel=document.createElement('select');sel.id='status-'+s.id;
+  ['Present','Absent','CUTTING','Late','Excused'].forEach(x=>sel.add(new Option(x,x)));
+  sel.value=old;
+  div.append(strong,info,sel);list.append(div);
+ });
+ renderReport();
+}
+function makeMessages(){
+ const c=selectedClass(),date=$('attDate').value;
+ if(!c||!date)return {messages:[],items:[]};
+ const items=[];
+ (db.students[c]||[]).forEach(s=>{
+  const k=keyFor(c,date,s.id);
+  const status=$('status-'+s.id)?.value||(db.attendance[k]||{}).status||'Present';
+  db.attendance[k]={status,studentId:s.id,classId:c,date};
+  if(['Absent','CUTTING'].includes(status)&&s.phone){
+   const sentKey=k+'|'+status;
+   if(!db.sent[sentKey]){
+    items.push({key:sentKey,phone:s.phone,message:
+      'CHRISTRACKER: '+s.name+' was marked '+status+
+      ' on '+date+'. Please contact the school if you need to clarify.'});
+   }
+  }
+ });
+ return {messages:items,items};
+}
+function sendSms(items){
+ if(!items.length){msg('No new absence SMS to send. Check attendance and guardian phone numbers.');return}
+ if(!window.AndroidBridge||typeof window.AndroidBridge.sendBulkSms!=='function'){
+  msg('SMS bridge unavailable. Open the installed Android Pro app and grant SMS permission.');
+  return;
+ }
+ if(!confirm('Submit '+items.length+' SMS message(s)? Standard SMS charges may apply.'))return;
+ try{
+  window.AndroidBridge.sendBulkSms(JSON.stringify(items.map(x=>({
+   phone:x.phone,message:x.message
+  }))));
+  items.forEach(x=>db.sent[x.key]=new Date().toISOString());
+  save();
+  msg('SMS submitted to Android. Submission does not confirm delivery.');
+ }catch(e){msg('Could not submit SMS: '+e.message)}
+}
+function saveAttendance(){
+ const c=selectedClass(),date=$('attDate').value;
+ if(!c||!date)return msg('Select a class and date first.');
+ const data=makeMessages();
+ save();renderReport();
+ if(db.smsMode==='automatic'){
+  sendSms(data.items);
+ }else{
+  msg('Attendance saved. Manual SMS mode is active.');
+ }
+}
+function sendManual(){
+ const c=selectedClass(),date=$('attDate').value;
+ if(!c||!date)return msg('Select a class and date first.');
+ const data=makeMessages();
+ save();
+ sendSms(data.items);
+}
+function renderReport(){
+ const c=selectedClass(),date=$('attDate').value;
+ const box=$('report');
+ if(!c||!date){box.textContent='Select a class and date to view the report.';return}
+ const students=db.students[c]||[];
+ const counts={Present:0,Absent:0,CUTTING:0,Late:0,Excused:0};
+ students.forEach(s=>{
+  const a=db.attendance[keyFor(c,date,s.id)];
+  if(a&&counts[a.status]!==undefined)counts[a.status]++;
+ });
+ box.textContent='Date: '+date+' | '+(db.classes.find(x=>x.id===c)?.name||'')+
+  ' | Total: '+students.length+' | '+Object.entries(counts).map(([k,v])=>k+': '+v).join(' | ');
+}
+function exportBackup(){
+ const blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'});
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement('a');
+ a.href=url;a.download='CHRISTRACKER-Pro-backup.json';a.click();
+ URL.revokeObjectURL(url);
+ msg('Backup download requested.');
+}
+async function restoreBackup(){
+ const file=$('restoreFile').files[0];
+ if(!file)return msg('Choose a JSON backup file first.');
+ if(!confirm('Restore this backup and replace current Pro records?'))return;
+ try{
+  const obj=JSON.parse(await file.text());
+  if(!Array.isArray(obj.classes)||!obj.students||!obj.attendance)
+   throw new Error('Invalid backup format.');
+  db=obj;save();refresh();render();
+  msg('Backup restored.');
+ }catch(e){msg('Restore failed: '+e.message)}
+}
+$('attDate').value=new Date().toISOString().slice(0,10);
+$('attDate').addEventListener('change',render);
+refresh();render();
+</script>
+</body>
+</html>
