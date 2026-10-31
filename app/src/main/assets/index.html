@@ -16,7 +16,9 @@ header p{margin:4px 0;font-size:13px}
 main{max-width:850px;margin:auto;padding:14px}
 section{background:white;padding:16px;margin:0 0 14px;border-radius:10px;border:1px solid #ddd}
 h2{font-size:18px;margin:0 0 14px}
-input,select,button{font:inherit;padding:11px;border-radius:6px;border:1px solid #bbb;width:100%;margin:4px 0}
+h3{font-size:15px;margin:14px 0 8px}
+input,select,button,textarea{font:inherit;padding:11px;border-radius:6px;border:1px solid #bbb;width:100%;margin:4px 0}
+textarea{min-height:120px;resize:vertical}
 button{background:var(--red);color:white;border:0;font-weight:bold;cursor:pointer}
 button.secondary{background:#555}
 button.danger{background:#a32121}
@@ -24,7 +26,9 @@ button.danger{background:#a32121}
 .small{font-size:12px;color:#555}
 .student{border:1px solid #ddd;border-radius:7px;padding:10px;margin:8px 0}
 .student strong{display:block;margin-bottom:5px}
-#notice{padding:10px;border-radius:6px;background:#fff0f0;margin-bottom:12px}
+#notice{padding:10px;border-radius:6px;background:#fff0f0;margin-bottom:12px;overflow-wrap:anywhere}
+.status-label{display:inline-block;font-size:12px;padding:4px 7px;background:#eee;border-radius:4px;margin:4px 0}
+@media(max-width:480px){.row{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -33,8 +37,9 @@ button.danger{background:#a32121}
 <p>SANDINGAN NATIONAL HIGH SCHOOL</p>
 <p>Calayugan Norte, Loon, Bohol | School ID: 302902</p>
 </header>
+
 <main>
-<div id="notice">Welcome! Create your class to begin.</div>
+<div id="notice">Welcome to CHRISTRACKER Pro.</div>
 
 <section>
 <h2>School Settings</h2>
@@ -45,7 +50,7 @@ button.danger{background:#a32121}
 <option value="manual">Manual — send only when I choose</option>
 <option value="automatic">Automatic — send when an absent status is recorded</option>
 </select>
-<p class="small">Automatic mode requires Android SMS permission, a SIM, a valid guardian number, and successful testing. SMS charges may apply.</p>
+<p class="small">Automatic SMS requires Android SMS permission, a SIM, a valid guardian number, and testing. Charges may apply.</p>
 <button onclick="saveSettings()">Save Settings</button>
 </section>
 
@@ -63,213 +68,565 @@ button.danger{background:#a32121}
 
 <section>
 <h2>2. Add Student</h2>
+<p class="small">A new student is Active by default. You can add guardian details now or later.</p>
 <input id="studentName" placeholder="Student full name">
-<input id="guardianName" placeholder="Parent/guardian name">
-<input id="guardianPhone" type="tel" placeholder="Guardian mobile number (e.g. 09XXXXXXXXX)">
+<input id="guardianName" placeholder="Parent/guardian name (optional)">
+<input id="guardianPhone" type="tel" placeholder="Guardian mobile number (optional)">
 <button onclick="addStudent()">Add Student</button>
+
+<hr>
+<h3>Bulk Import from Excel</h3>
+<p class="small">Copy the student rows from Excel and paste below. Use one student per line. Columns may be: Student Name, Guardian Name, Phone Number. The first column must contain the student name. Guardian details are optional.</p>
+<textarea id="bulkNames" placeholder="Juan Dela Cruz&#10;Maria Santos&#10;Pedro Reyes"></textarea>
+<button onclick="importStudents()">Import Students</button>
 </section>
 
 <section>
-<h2>3. Record Attendance</h2>
+<h2>3. Edit Student / Enrollment Status</h2>
+<p class="small">Select a student to update their information or enrollment status. Transfer Out and Dropped students are hidden from daily attendance, but their existing attendance records are retained.</p>
+<label for="editStudentSelect">Select Student</label>
+<select id="editStudentSelect" onchange="loadStudentEditor()">
+<option value="">Select a student</option>
+</select>
+<div id="studentEditor">
+<p class="small">Select a class and student to edit.</p>
+</div>
+</section>
+
+<section>
+<h2>4. Record Attendance</h2>
 <label for="attDate">Attendance date</label>
 <input id="attDate" type="date">
-<div id="attendanceList">Add a class and students first.</div>
+<div id="attendanceList">Add a class and active students first.</div>
 <button onclick="saveAttendance()">Save Attendance</button>
 <button class="secondary" onclick="sendManual()">Send Pending Absence SMS (Manual)</button>
 </section>
 
 <section>
-<h2>4. Attendance Report</h2>
+<h2>5. Attendance Report</h2>
 <div id="report">No records yet.</div>
 <button class="secondary" onclick="exportBackup()">Download Backup (JSON)</button>
 <label for="restoreFile">Restore from JSON backup</label>
 <input id="restoreFile" type="file" accept=".json,application/json">
 <button class="secondary" onclick="restoreBackup()">Restore Backup</button>
-<p class="small">Keep a copy of your backup in a safe location. Restoring a backup replaces this Pro app's current data.</p>
+<p class="small">Keep backups in a safe location. Restoring replaces this Pro app's current data. Always back up before restoring.</p>
 </section>
 </main>
 
 <script>
 'use strict';
+
 const KEY='christracker_pro_data';
 const $=id=>document.getElementById(id);
+
 const blank=()=>({
- schoolYear:'2026–2027',smsMode:'manual',
- classes:[],students:{},attendance:{},sent:{}
+ schoolYear:'2026–2027',
+ smsMode:'manual',
+ classes:[],
+ students:{},
+ attendance:{},
+ sent:{}
 });
+
 let db;
 try{
  db=JSON.parse(localStorage.getItem(KEY))||blank();
- if(!Array.isArray(db.classes)) db=blank();
-}catch(e){db=blank()}
+ if(!Array.isArray(db.classes)||!db.students||!db.attendance){
+  db=blank();
+ }
+ if(!db.sent)db.sent={};
+ if(!db.smsMode)db.smsMode='manual';
+ if(!db.schoolYear)db.schoolYear='2026–2027';
+}catch(e){
+ db=blank();
+}
 
 function save(){
  localStorage.setItem(KEY,JSON.stringify(db));
 }
+
 function msg(t){
  $('notice').textContent=t;
 }
+
 function id(){
  return 'id-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
 }
+
+function statusOf(s){
+ return s.enrollmentStatus||'Active';
+}
+
+function isActive(s){
+ return statusOf(s)==='Active';
+}
+
 function saveSettings(){
  db.schoolYear=$('sy').value.trim()||'2026–2027';
  db.smsMode=$('smsMode').value;
  save();
  msg('Settings saved.');
 }
+
 function addClass(){
  const name=$('className').value.trim();
  if(!name)return msg('Enter a class name first.');
+
  const c={id:id(),name};
  db.classes.push(c);
  db.students[c.id]=[];
+
  $('className').value='';
- save();refresh();$('classSelect').value=c.id;render();
+ save();
+ refresh();
+ $('classSelect').value=c.id;
+ render();
  msg('Class added.');
 }
-function selectedClass(){return $('classSelect').value}
+
+function selectedClass(){
+ return $('classSelect').value;
+}
+
 function addStudent(){
  const c=selectedClass();
  if(!c)return msg('Create and select a class first.');
+
  const name=$('studentName').value.trim();
  if(!name)return msg('Enter the student name.');
+
  const s={
-  id:id(),name,
+  id:id(),
+  name,
   guardian:$('guardianName').value.trim(),
-  phone:$('guardianPhone').value.trim()
+  phone:$('guardianPhone').value.trim(),
+  enrollmentStatus:'Active',
+  statusDate:''
  };
+
  db.students[c]=db.students[c]||[];
  db.students[c].push(s);
+
  $('studentName').value='';
  $('guardianName').value='';
  $('guardianPhone').value='';
- save();render();
- msg('Student added.');
+
+ save();
+ refreshStudentEditor();
+ render();
+ msg('Student added as Active.');
 }
+
+function importStudents(){
+ const c=selectedClass();
+ if(!c)return msg('Create and select a class first.');
+
+ const raw=$('bulkNames').value.trim();
+ if(!raw)return msg('Paste the student list first.');
+
+ const lines=raw.split(/\r?\n/).filter(line=>line.trim()!=='');
+ const imported=[];
+
+ lines.forEach(line=>{
+  const cols=line.split('\t').map(x=>x.trim());
+  const name=cols[0]||'';
+  if(!name)return;
+
+  // Skip a common Excel header row.
+  if(imported.length===0 && /^(student name|name|learner name)$/i.test(name)){
+   return;
+  }
+
+  imported.push({
+   id:id(),
+   name,
+   guardian:cols[1]||'',
+   phone:cols[2]||'',
+   enrollmentStatus:'Active',
+   statusDate:''
+  });
+ });
+
+ if(!imported.length)return msg('No student names found.');
+
+ db.students[c]=db.students[c]||[];
+ db.students[c].push(...imported);
+
+ $('bulkNames').value='';
+ save();
+ refreshStudentEditor();
+ render();
+ msg(imported.length+' student(s) imported as Active.');
+}
+
 function refresh(){
  const old=$('classSelect').value;
  $('classSelect').innerHTML='';
+
  if(!db.classes.length){
   $('classSelect').add(new Option('No classes yet',''));
  }else{
-  db.classes.forEach(c=>$('classSelect').add(new Option(c.name,c.id)));
-  if(db.classes.some(c=>c.id===old))$('classSelect').value=old;
+  db.classes.forEach(c=>{
+   $('classSelect').add(new Option(c.name,c.id));
+  });
+  if(db.classes.some(c=>c.id===old)){
+   $('classSelect').value=old;
+  }
  }
+
  $('sy').value=db.schoolYear||'2026–2027';
  $('smsMode').value=db.smsMode||'manual';
+ refreshStudentEditor();
 }
-function keyFor(c,date,s){return c+'|'+date+'|'+s}
+
+function keyFor(c,date,s){
+ return c+'|'+date+'|'+s;
+}
+
 function render(){
- const c=selectedClass(),date=$('attDate').value;
+ const c=selectedClass();
+ const date=$('attDate').value;
  const list=$('attendanceList');
  list.innerHTML='';
- if(!c){list.textContent='Create and select a class first.';renderReport();return}
- const students=db.students[c]||[];
- if(!students.length){list.textContent='No students in this class yet.';renderReport();return}
+
+ if(!c){
+  list.textContent='Create and select a class first.';
+  renderReport();
+  return;
+ }
+
+ const students=(db.students[c]||[]).filter(isActive);
+
+ if(!students.length){
+  list.textContent='No active students in this class. Add students or update their enrollment status.';
+  renderReport();
+  return;
+ }
+
  students.forEach(s=>{
   const k=keyFor(c,date,s.id);
   const old=(db.attendance[k]||{}).status||'Present';
-  const div=document.createElement('div');div.className='student';
-  const strong=document.createElement('strong');strong.textContent=s.name;
-  const info=document.createElement('div');info.className='small';
-  info.textContent='Guardian: '+(s.guardian||'Not provided')+' | '+(s.phone||'No phone');
-  const sel=document.createElement('select');sel.id='status-'+s.id;
-  ['Present','Absent','CUTTING','Late','Excused'].forEach(x=>sel.add(new Option(x,x)));
+
+  const div=document.createElement('div');
+  div.className='student';
+
+  const strong=document.createElement('strong');
+  strong.textContent=s.name;
+
+  const info=document.createElement('div');
+  info.className='small';
+  info.textContent='Guardian: '+(s.guardian||'Not provided')+
+   ' | Phone: '+(s.phone||'Not provided');
+
+  const sel=document.createElement('select');
+  sel.id='status-'+s.id;
+
+  ['Present','Absent','CUTTING','Late','Excused'].forEach(x=>{
+   sel.add(new Option(x,x));
+  });
+
   sel.value=old;
-  div.append(strong,info,sel);list.append(div);
+  div.append(strong,info,sel);
+  list.append(div);
  });
+
  renderReport();
 }
+
+function refreshStudentEditor(){
+ const c=selectedClass();
+ const select=$('editStudentSelect');
+ if(!select)return;
+
+ const previous=select.value;
+ select.innerHTML='';
+ select.add(new Option('Select a student',''));
+
+ if(c){
+  (db.students[c]||[]).forEach(s=>{
+   const label=s.name+' ('+statusOf(s)+')';
+   select.add(new Option(label,s.id));
+  });
+ }
+
+ if(c&&(db.students[c]||[]).some(s=>s.id===previous)){
+  select.value=previous;
+ }
+
+ loadStudentEditor();
+}
+
+function findSelectedStudent(){
+ const c=selectedClass();
+ const sid=$('editStudentSelect').value;
+ if(!c||!sid)return null;
+
+ const student=(db.students[c]||[]).find(s=>s.id===sid);
+ return student?{c,student}:null;
+}
+
+function loadStudentEditor(){
+ const box=$('studentEditor');
+ const found=findSelectedStudent();
+ box.innerHTML='';
+
+ if(!found){
+  box.textContent='Select a student to edit.';
+  return;
+ }
+
+ const s=found.student;
+
+ const name=document.createElement('input');
+ name.id='editName';
+ name.placeholder='Student full name';
+ name.value=s.name||'';
+
+ const guardian=document.createElement('input');
+ guardian.id='editGuardian';
+ guardian.placeholder='Parent/guardian name';
+ guardian.value=s.guardian||'';
+
+ const phone=document.createElement('input');
+ phone.id='editPhone';
+ phone.type='tel';
+ phone.placeholder='Guardian mobile number';
+ phone.value=s.phone||'';
+
+ const statusLabel=document.createElement('label');
+ statusLabel.htmlFor='editEnrollmentStatus';
+ statusLabel.textContent='Enrollment status';
+
+ const status=document.createElement('select');
+ status.id='editEnrollmentStatus';
+
+ ['Active','Transferred Out','Dropped'].forEach(x=>{
+  status.add(new Option(x,x));
+ });
+ status.value=statusOf(s);
+
+ const dateLabel=document.createElement('label');
+ dateLabel.htmlFor='editStatusDate';
+ dateLabel.textContent='Status effective date (optional)';
+
+ const date=document.createElement('input');
+ date.type='date';
+ date.id='editStatusDate';
+ date.value=s.statusDate||'';
+
+ const note=document.createElement('p');
+ note.className='small';
+ note.textContent='Active students appear in daily attendance. Inactive status changes do not delete historical attendance. To record a Transfer In, add the student as a new Active student in this class.';
+
+ const button=document.createElement('button');
+ button.textContent='Save Student Changes';
+ button.onclick=saveStudentChanges;
+
+ box.append(name,guardian,phone,statusLabel,status,dateLabel,date,note,button);
+}
+
+function saveStudentChanges(){
+ const found=findSelectedStudent();
+ if(!found)return msg('Select a student first.');
+
+ const name=$('editName').value.trim();
+ if(!name)return msg('Student name cannot be empty.');
+
+ const s=found.student;
+ const newStatus=$('editEnrollmentStatus').value;
+
+ s.name=name;
+ s.guardian=$('editGuardian').value.trim();
+ s.phone=$('editPhone').value.trim();
+ s.enrollmentStatus=newStatus;
+ s.statusDate=$('editStatusDate').value;
+
+ save();
+ refreshStudentEditor();
+ render();
+ msg('Student details saved. Previous attendance records retained.');
+}
+
 function makeMessages(){
- const c=selectedClass(),date=$('attDate').value;
- if(!c||!date)return {messages:[],items:[]};
+ const c=selectedClass();
+ const date=$('attDate').value;
+ if(!c||!date)return {items:[]};
+
  const items=[];
- (db.students[c]||[]).forEach(s=>{
+
+ (db.students[c]||[]).filter(isActive).forEach(s=>{
   const k=keyFor(c,date,s.id);
-  const status=$('status-'+s.id)?.value||(db.attendance[k]||{}).status||'Present';
-  db.attendance[k]={status,studentId:s.id,classId:c,date};
+  const selector=$('status-'+s.id);
+  const status=selector?selector.value:
+   ((db.attendance[k]||{}).status||'Present');
+
+  db.attendance[k]={
+   ...(db.attendance[k]||{}),
+   status,
+   studentId:s.id,
+   classId:c,
+   date
+  };
+
   if(['Absent','CUTTING'].includes(status)&&s.phone){
    const sentKey=k+'|'+status;
    if(!db.sent[sentKey]){
-    items.push({key:sentKey,phone:s.phone,message:
-      'CHRISTRACKER: '+s.name+' was marked '+status+
-      ' on '+date+'. Please contact the school if you need to clarify.'});
+    items.push({
+     key:sentKey,
+     phone:s.phone,
+     message:'CHRISTRACKER: '+s.name+' was marked '+
+      status+' on '+date+
+      '. Please contact the school if you need to clarify.'
+    });
    }
   }
  });
- return {messages:items,items};
+
+ return {items};
 }
+
 function sendSms(items){
- if(!items.length){msg('No new absence SMS to send. Check attendance and guardian phone numbers.');return}
- if(!window.AndroidBridge||typeof window.AndroidBridge.sendBulkSms!=='function'){
-  msg('SMS bridge unavailable. Open the installed Android Pro app and grant SMS permission.');
+ if(!items.length){
+  msg('No new absence SMS to send. Check attendance and guardian phone numbers.');
   return;
  }
- if(!confirm('Submit '+items.length+' SMS message(s)? Standard SMS charges may apply.'))return;
+
+ if(!window.AndroidBridge||
+    typeof window.AndroidBridge.sendBulkSms!=='function'){
+  msg('SMS bridge unavailable. Open the installed Android Pro app and check SMS permission.');
+  return;
+ }
+
+ if(!confirm('Submit '+items.length+
+  ' SMS message(s)? Standard SMS charges may apply.'))return;
+
  try{
-  window.AndroidBridge.sendBulkSms(JSON.stringify(items.map(x=>({
-   phone:x.phone,message:x.message
-  }))));
-  items.forEach(x=>db.sent[x.key]=new Date().toISOString());
+  window.AndroidBridge.sendBulkSms(JSON.stringify(
+   items.map(x=>({phone:x.phone,message:x.message}))
+  ));
+
+  items.forEach(x=>{
+   db.sent[x.key]=new Date().toISOString();
+  });
+
   save();
   msg('SMS submitted to Android. Submission does not confirm delivery.');
- }catch(e){msg('Could not submit SMS: '+e.message)}
+ }catch(e){
+  msg('Could not submit SMS: '+e.message);
+ }
 }
+
 function saveAttendance(){
- const c=selectedClass(),date=$('attDate').value;
+ const c=selectedClass();
+ const date=$('attDate').value;
  if(!c||!date)return msg('Select a class and date first.');
+
  const data=makeMessages();
- save();renderReport();
+ save();
+ renderReport();
+
  if(db.smsMode==='automatic'){
   sendSms(data.items);
  }else{
   msg('Attendance saved. Manual SMS mode is active.');
  }
 }
+
 function sendManual(){
- const c=selectedClass(),date=$('attDate').value;
+ const c=selectedClass();
+ const date=$('attDate').value;
  if(!c||!date)return msg('Select a class and date first.');
+
  const data=makeMessages();
  save();
  sendSms(data.items);
 }
+
 function renderReport(){
- const c=selectedClass(),date=$('attDate').value;
+ const c=selectedClass();
+ const date=$('attDate').value;
  const box=$('report');
- if(!c||!date){box.textContent='Select a class and date to view the report.';return}
+
+ if(!c||!date){
+  box.textContent='Select a class and date to view the report.';
+  return;
+ }
+
  const students=db.students[c]||[];
+ const active=students.filter(isActive).length;
+ const inactive=students.length-active;
  const counts={Present:0,Absent:0,CUTTING:0,Late:0,Excused:0};
+ let recorded=0;
+
  students.forEach(s=>{
   const a=db.attendance[keyFor(c,date,s.id)];
-  if(a&&counts[a.status]!==undefined)counts[a.status]++;
+  if(a&&counts[a.status]!==undefined){
+   counts[a.status]++;
+   recorded++;
+  }
  });
- box.textContent='Date: '+date+' | '+(db.classes.find(x=>x.id===c)?.name||'')+
-  ' | Total: '+students.length+' | '+Object.entries(counts).map(([k,v])=>k+': '+v).join(' | ');
+
+ box.textContent='Date: '+date+
+  ' | Class: '+(db.classes.find(x=>x.id===c)?.name||'')+
+  ' | Active: '+active+
+  ' | Inactive: '+inactive+
+  ' | Students with recorded attendance: '+recorded+
+  ' | '+Object.entries(counts).map(([k,v])=>k+': '+v).join(' | ');
 }
+
 function exportBackup(){
- const blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'});
+ const blob=new Blob([JSON.stringify(db,null,2)],{
+  type:'application/json'
+ });
  const url=URL.createObjectURL(blob);
  const a=document.createElement('a');
- a.href=url;a.download='CHRISTRACKER-Pro-backup.json';a.click();
- URL.revokeObjectURL(url);
- msg('Backup download requested.');
+ a.href=url;
+ a.download='CHRISTRACKER-Pro-backup.json';
+ a.click();
+ setTimeout(()=>URL.revokeObjectURL(url),1000);
+ msg('Backup download requested. Check your Downloads folder.');
 }
+
 async function restoreBackup(){
  const file=$('restoreFile').files[0];
  if(!file)return msg('Choose a JSON backup file first.');
- if(!confirm('Restore this backup and replace current Pro records?'))return;
+
+ if(!confirm('Restore this backup and replace current Pro records? Download a backup of current records first if needed.'))return;
+
  try{
   const obj=JSON.parse(await file.text());
-  if(!Array.isArray(obj.classes)||!obj.students||!obj.attendance)
+
+  if(!Array.isArray(obj.classes)||!obj.students||!obj.attendance){
    throw new Error('Invalid backup format.');
-  db=obj;save();refresh();render();
+  }
+
+  if(!obj.sent)obj.sent={};
+
+  // Existing imported records without a status remain Active.
+  Object.values(obj.students).forEach(list=>{
+   if(Array.isArray(list)){
+    list.forEach(s=>{
+     if(!s.enrollmentStatus)s.enrollmentStatus='Active';
+     if(!s.statusDate)s.statusDate='';
+    });
+   }
+  });
+
+  db=obj;
+  save();
+  refresh();
+  render();
   msg('Backup restored.');
- }catch(e){msg('Restore failed: '+e.message)}
+ }catch(e){
+  msg('Restore failed: '+e.message);
+ }
 }
+
 $('attDate').value=new Date().toISOString().slice(0,10);
 $('attDate').addEventListener('change',render);
-refresh();render();
+
+refresh();
+render();
 </script>
 </body>
 </html>
